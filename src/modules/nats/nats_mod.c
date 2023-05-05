@@ -84,6 +84,7 @@ static void onMsg(
 {
 	nats_on_message_ptr on_message = (nats_on_message_ptr)closure;
 	char *data = (char *)natsMsg_GetData(msg);
+	LM_DBG("recieved message: %s\n", data);
 	eventData = data;
 	nats_run_cfg_route(on_message->rt, &on_message->evname);
 	eventData = NULL;
@@ -155,7 +156,7 @@ void nats_consumer_worker_proc(nats_consumer_worker_t *worker)
 	s = natsConnection_QueueSubscribe(&worker->subscription, worker->nc->conn,
 			worker->subject, worker->queue_group, onMsg, worker->on_message);
 	if(s != NATS_OK) {
-		LM_ERR("could not subscribe [%s]\n", natsStatus_GetText(s));
+		LM_ERR("could not subscribe to subject %s [%s]\n", worker->subject, natsStatus_GetText(s));
 	}
 
 	s = natsSubscription_SetPendingLimits(worker->subscription, -1, -1);
@@ -221,9 +222,9 @@ static int mod_init(void)
 }
 
 int init_worker(
-		nats_consumer_worker_t *worker, char *subject, char *queue_group)
+		nats_consumer_worker_t *worker, char *subject, char *queue_group, char *route)
 {
-	int buffsize = strlen(subject) + 6;
+	int buffsize = strlen(route) + 6;
 	char routename[buffsize];
 	int rt;
 	nats_connection_ptr nc = NULL;
@@ -235,9 +236,12 @@ int init_worker(
 		return -1;
 	}
 
+	LM_DBG("setting subject [%s]\n", subject);
+
 	memset(worker, 0, sizeof(*worker));
 	worker->subject = shm_malloc(strlen(subject) + 1);
 	strcpy(worker->subject, subject);
+
 	worker->subject[strlen(subject)] = '\0';
 	worker->queue_group = shm_malloc(strlen(queue_group) + 1);
 	strcpy(worker->queue_group, queue_group);
@@ -246,8 +250,10 @@ int init_worker(
 			(nats_on_message_ptr)shm_malloc(sizeof(nats_on_message));
 	memset(worker->on_message, 0, sizeof(nats_on_message));
 
-	snprintf(routename, buffsize, "nats:%s", subject);
+	snprintf(routename, buffsize, "nats:%s", route);
 	routename[buffsize] = '\0';
+
+	LM_DBG("looking for route [%s]\n", routename);
 
 	rt = route_get(&event_rt, routename);
 	if(rt < 0 || event_rt.rlist[rt] == NULL) {
@@ -346,7 +352,7 @@ static int mod_child_init(int rank)
 	if(rank == PROC_INIT) {
 		n = _init_nats_sc;
 		while(n) {
-			if(init_worker(&nats_workers[i], n->sub, n->queue_group) < 0) {
+			if(init_worker(&nats_workers[i], n->sub, n->queue_group, n->route) < 0) {
 				LM_ERR("failed to init struct for worker [%d]\n", i);
 				return -1;
 			}
@@ -695,6 +701,8 @@ int nats_run_cfg_route(int rt, str *evname)
 			return 0;
 	}
 
+	LM_DBG("looking for event block for %s\n", evname->s);
+
 	fmsg = faked_msg_next();
 	memcpy(&tmsg, fmsg, sizeof(sip_msg_t));
 	fmsg = &tmsg;
@@ -705,8 +713,11 @@ int nats_run_cfg_route(int rt, str *evname)
 				< 0) {
 			LM_ERR("error running event route kemi callback\n");
 		}
+		LM_DBG("executed KEMI callback\n");
 		return 0;
 	}
+
+	LM_DBG("found no KEMI callback, trying to execute route\n");
 	run_top_route(event_rt.rlist[rt], fmsg, 0);
 	return 0;
 }
@@ -757,7 +768,7 @@ nats_connection_ptr _init_nats_connection()
 	return p;
 }
 
-init_nats_sub_ptr _init_nats_sub_new(char *sub, char *queue_group)
+init_nats_sub_ptr _init_nats_sub_new(char *sub, char *queue_group, char *route)
 {
 	init_nats_sub_ptr p = (init_nats_sub_ptr)shm_malloc(sizeof(init_nats_sub));
 	memset(p, 0, sizeof(init_nats_sub));
@@ -767,6 +778,9 @@ init_nats_sub_ptr _init_nats_sub_new(char *sub, char *queue_group)
 	p->queue_group = shm_malloc(strlen(queue_group) + 1);
 	strcpy(p->queue_group, queue_group);
 	p->queue_group[strlen(queue_group)] = '\0';
+	p->route = shm_malloc(strlen(route) + 1);
+	strcpy(p->route, route);
+	p->route[strlen(route)] = '\0';
 	return p;
 }
 
@@ -775,6 +789,7 @@ int init_nats_sub_add(char *sc)
 	int len;
 	char *s;
 	char *c;
+	char *r;
 	init_nats_sub_ptr n;
 
 	if(sc == NULL) {
@@ -791,10 +806,17 @@ int init_nats_sub_add(char *sc)
 	s[len] = '\0';
 
 	if((c = strchr(s, ':')) != 0) {
+		if((r = strchr(c, '#')) != 0) {
+			*r = 0;
+			for(r = r + 1; !*r; r++)
+				;
+		}
+
 		*c = 0;
-		for(c = c + 1; !*c; c++)
+		for(c = c + 1; !*c ; c++)
 			;
 	}
+
 	if(s == NULL) {
 		goto error;
 		return -1;
@@ -803,12 +825,16 @@ int init_nats_sub_add(char *sc)
 		goto error;
 		return -1;
 	}
+	if(r == NULL) {
+		r = s;
+	}
 
 	n = _init_nats_sc;
 	while(n != NULL) {
 		n = n->next;
 	}
-	n = _init_nats_sub_new(s, c);
+
+	n = _init_nats_sub_new(s, c, r);
 	n->next = _init_nats_sc;
 	_init_nats_sc = n;
 	_nats_proc_count++;

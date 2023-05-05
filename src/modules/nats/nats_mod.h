@@ -56,7 +56,7 @@ int nats_cleanup_connection(nats_connection_ptr c);
 
 int _init_nats_sub_add(modparam_t type, void *val);
 nats_connection_ptr _init_nats_connection();
-init_nats_sub_ptr _init_nats_sub_new(char *sub, char *queue_group);
+init_nats_sub_ptr _init_nats_sub_new(char *sub, char *queue_group, char *route);
 int init_nats_sub_add(char *sub);
 int nats_cleanup_init_sub();
 

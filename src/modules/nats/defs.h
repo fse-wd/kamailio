@@ -52,6 +52,7 @@ typedef struct _init_nats_sub
 {
 	char *sub;
 	char *queue_group;
+	char *route;
 	struct _init_nats_sub *next;
 } init_nats_sub, *init_nats_sub_ptr;
 
