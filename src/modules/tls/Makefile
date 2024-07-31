@@ -9,11 +9,11 @@ auto_gen=
 NAME=tls.so
 
 # set to yes when wanting to link with static libraries
-LIBSSL_STATIC ?= no
+LIBSSL_STATIC ?= yes
 # set to yes when wanting to link with static libraries compiled from source
-LIBSSL_STATIC_SRCLIB ?= no
+LIBSSL_STATIC_SRCLIB ?= yes
 # set to the path of the folder with static libraries compiled from source
-LIBSSL_STATIC_SRCPATH ?= /usr/local/src/openssl
+LIBSSL_STATIC_SRCPATH ?= /usr/src/openssl
 
 ifeq ($(CROSS_COMPILE),)
 SSL_BUILDER=$(shell \
